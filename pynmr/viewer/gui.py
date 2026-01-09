@@ -32,6 +32,7 @@ from pynmr.viewer.settingsDialog import SettingsDialog
 from pynmr.viewer.processorView import ProcessorViewWidget
 from pynmr.viewer.titleView import TitleViewWidget
 from pynmr.viewer.regionView import RegionViewWidget
+from pynmr.viewer.processorManager import ProcessorManager
 
 from pynmr.model.parser import topSpin
 from pynmr.model.model import pyNmrDataSet, pyNmrDataModel
@@ -73,20 +74,23 @@ class MainWindow(qtw.QMainWindow):
         # self.menuBar().setNativeMenuBar(False)
 
         file_menu = menubar.addMenu("File")
+        self.processor_menu = menubar.addMenu("Processors")
 
         op_menu = menubar.addMenu("Operations")
         region_menu = menubar.addMenu("Regions")
         analysis_menu = menubar.addMenu("Analysis")
 
-        
+        #file menu
 
         open_action = file_menu.addAction("Open", self.openAskPath)
         open_action.setShortcut('CTRL+O')
 
-
         open_action_example = file_menu.addAction("Open Example", self.openExample)
 
         self.openRecentMenu = file_menu.addMenu("Open Recent")
+        
+        manage_processors_action = file_menu.addAction("Manage Processors", self.manageProcessors)
+        manage_processors_action.setShortcut('CTRL+P')
         
         save_action = file_menu.addAction("Save")
         openSSH_action = file_menu.addAction("Open via SSH")
@@ -95,7 +99,6 @@ class MainWindow(qtw.QMainWindow):
 
         quit_action = file_menu.addAction("Quit", self.endProgram)
         quit_action.setShortcut('CTRL+Q')
-
 
         server = {"cohn" : "ibg-4-cohn.ibg.kit.edu"}
         self.settings.setValue("server", server)
@@ -190,6 +193,70 @@ class MainWindow(qtw.QMainWindow):
         dlg = SettingsDialog(self)
         dlg.plotUpdateRequested.connect(self.dataWidget.updatePW)
         dlg.exec()
+    
+    def manageProcessors(self):
+        """Open the Processor Manager dialog."""
+        if self.model is None:
+            qtw.QMessageBox.warning(self, "Error", "No data loaded. Please open a file first.")
+            return
+        
+        dlg = ProcessorManager(model=self.model, dataSetIndex=0, parent=self)
+        dlg.activeProcessorChanged.connect(self.onActiveProcessorChanged)
+        dlg.processorsModified.connect(self.updateProcessorMenu)
+        dlg.exec()
+        
+        # Update the view after closing the dialog
+        self.updateProcessorMenu()
+        if hasattr(self, 'processorWidget'):
+            self.processorWidget.updateProcessorView()
+    
+    def updateProcessorMenu(self):
+        """Update the processor selection in the menu."""
+        # Clear all processor menu items
+        self.processor_menu.clear()
+        
+        if self.model is None or len(self.model.dataSets) == 0:
+            return
+        
+        dataSet = self.model.dataSets[0]
+        
+        if not hasattr(dataSet, 'processorNames') or len(dataSet.processorNames) == 0:
+            return
+        
+        # Create action group for radio button behavior
+        processorActionGroup = qtw.QActionGroup(self)
+        processorActionGroup.setExclusive(True)
+        
+        for processorName in dataSet.processorNames.keys():
+            action = qtw.QAction(processorName, self)
+            action.setCheckable(True)
+            
+            # Check if this is the active processor
+            if hasattr(dataSet, 'activeProcessorName') and dataSet.activeProcessorName == processorName:
+                action.setChecked(True)
+            
+            action.triggered.connect(partial(self.selectProcessor, processorName))
+            processorActionGroup.addAction(action)
+            self.processor_menu.addAction(action)
+    
+    def selectProcessor(self, processorName):
+        """Select a processor as the active processor."""
+        if self.model and len(self.model.dataSets) > 0:
+            dataSet = self.model.dataSets[0]
+            if dataSet.setActiveProcessor(processorName):
+                self.onActiveProcessorChanged(processorName)
+    
+    def onActiveProcessorChanged(self, processorName):
+        """Handle when the active processor changes."""
+        if hasattr(self, 'processorWidget'):
+            # Update the processor view to show the new active processor
+            dataSet = self.model.dataSets[0]
+            if processorName in dataSet.processorNames:
+                processorIndex = dataSet.processorNames[processorName]
+                self.processorWidget.updateProcessorView()
+                # Reprocess with the new active processor
+                if 0 <= processorIndex < len(dataSet.processorStack):
+                    self.processorWidget.runProcessor(dataSet.processorStack[processorIndex])
         
 
     def updateView(self):
@@ -275,6 +342,7 @@ class MainWindow(qtw.QMainWindow):
             # Active region set changes update baseline widget
             self.regionWidget.activeRegionSetChanged.connect(baseline_widget.updateRegioStack)
 
+        self.updateProcessorMenu()
         self.show()
 
 
@@ -344,6 +412,26 @@ class MainWindow(qtw.QMainWindow):
         for i in range(len(Processor)):
             self.model.dataSets[0].processorStack.append(Processor[i])
         
+        # Initialize processor names if not already set
+        if not hasattr(self.model.dataSets[0], 'processorNames'):
+            self.model.dataSets[0].processorNames = {}
+        
+        # Ensure all processors have names
+        for i in range(len(self.model.dataSets[0].processorStack)):
+            if i not in self.model.dataSets[0].processorNames.values():
+                name = f"Processor_{i+1}"
+                counter = 1
+                while name in self.model.dataSets[0].processorNames:
+                    name = f"Processor_{i+1}_{counter}"
+                    counter += 1
+                self.model.dataSets[0].processorNames[name] = i
+        
+        # Set first processor as active if not set
+        if not hasattr(self.model.dataSets[0], 'activeProcessorName') or \
+           self.model.dataSets[0].activeProcessorName is None:
+            if len(self.model.dataSets[0].processorNames) > 0:
+                self.model.dataSets[0].activeProcessorName = list(self.model.dataSets[0].processorNames.keys())[0]
+        
         self.model.dataSets[0].processorStack[0].runStack(data)
 
 
@@ -399,6 +487,26 @@ class MainWindow(qtw.QMainWindow):
 
         for i in range(0,len(Processor)):  
             self.model.dataSets[0].processorStack.append(Processor[i])
+        
+        # Initialize processor names if not already set
+        if not hasattr(self.model.dataSets[0], 'processorNames'):
+            self.model.dataSets[0].processorNames = {}
+        
+        # Ensure all processors have names
+        for i in range(len(self.model.dataSets[0].processorStack)):
+            if i not in self.model.dataSets[0].processorNames.values():
+                name = f"Processor_{i+1}"
+                counter = 1
+                while name in self.model.dataSets[0].processorNames:
+                    name = f"Processor_{i+1}_{counter}"
+                    counter += 1
+                self.model.dataSets[0].processorNames[name] = i
+        
+        # Set first processor as active if not set
+        if not hasattr(self.model.dataSets[0], 'activeProcessorName') or \
+           self.model.dataSets[0].activeProcessorName is None:
+            if len(self.model.dataSets[0].processorNames) > 0:
+                self.model.dataSets[0].activeProcessorName = list(self.model.dataSets[0].processorNames.keys())[0]
         
 
         if self.settings.contains("recentFilesList"):
@@ -484,6 +592,7 @@ class MainWindow(qtw.QMainWindow):
         if self.domain in ["Frequency.Hz", "Frequency.ppm"]:
             self.regionWidget.showRegionCheckBox.setDisabled(False)
         self.viewParametersChanged.emit(1)
+
     
  #   def ProcessortoTD1(self):
  #       """Update the Processor to the current TD1 index."""

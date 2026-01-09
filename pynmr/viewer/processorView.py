@@ -35,37 +35,65 @@ class ProcessorViewWidget(qtw.QFrame):
         super().__init__()
         self.model = model
         self.parent = parent
+        self.dataSetIndex = dataSetIndex
+        
         print("TD1_index in Prozessor: ", self.parent.TD1_index)
         print("Processor Index: ", self.parent.processorIndex)
         
         mainLayout = qtw.QVBoxLayout()
         self.setLayout(mainLayout)
 
+        self.scrollArea = qtw.QScrollArea()
+        self.scrollArea.setWidgetResizable(True)
+        mainLayout.addWidget(self.scrollArea)
 
-        scrollArea = qtw.QScrollArea()
-        scrollArea.setWidgetResizable(True)
-        mainLayout.addWidget(scrollArea)
+        self.scrollWidget = qtw.QWidget()
+        self.scrollArea.setWidget(self.scrollWidget)
 
-        scrollWidget = qtw.QWidget()
-        scrollArea.setWidget(scrollWidget)
-
-        scrollLayout = qtw.QVBoxLayout()
-        scrollWidget.setLayout(scrollLayout)
-
-        self.dataSetIndex = dataSetIndex
-        pStack = self.model.dataSets[dataSetIndex].processorStack
+        self.scrollLayout = qtw.QVBoxLayout()
+        self.scrollWidget.setLayout(self.scrollLayout)
 
         self.pWidgets = []
-
-        #for number, p in enumerate(pStack):
-        #pnumber = TD1_index
-        #print("PNUMBER: ", pnumber)
         
-        p = pStack[self.parent.processorIndex]
+        # Build the processor view
+        self.buildProcessorView()
+    
+    def buildProcessorView(self):
+        """Build or rebuild the processor view for the active processor."""
+        # Clear existing widgets
+        while self.scrollLayout.count():
+            item = self.scrollLayout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.pWidgets = []
+        
+        pStack = self.model.dataSets[self.dataSetIndex].processorStack
+        
+        if len(pStack) == 0:
+            # No processors available
+            label = qtw.QLabel("No processors available. Use 'Manage Processors' to create one.")
+            self.scrollLayout.addWidget(label)
+            return
+        
+        # Get the active processor
+        activeProcessor = self.model.dataSets[self.dataSetIndex].getActiveProcessor()
+        if activeProcessor is None:
+            activeProcessor = pStack[self.parent.processorIndex]
+        
+        # Get processor name
+        processorName = "Processor"
+        if hasattr(self.model.dataSets[self.dataSetIndex], 'activeProcessorName'):
+            processorName = self.model.dataSets[self.dataSetIndex].activeProcessorName
+        
+        p = activeProcessor
         runFunc = partial(self.runProcessor, p)
         
-        pBox = qtw.QGroupBox(f"Processor {self.parent.processorIndex}")
-        scrollLayout.addWidget(pBox, 1)
+        p = activeProcessor
+        runFunc = partial(self.runProcessor, p)
+        
+        pBox = qtw.QGroupBox(f"{processorName}")
+        self.scrollLayout.addWidget(pBox, 1)
 
         self.thisProcessorLayout = qtw.QVBoxLayout()
         pBox.setLayout(self.thisProcessorLayout)
@@ -122,11 +150,15 @@ class ProcessorViewWidget(qtw.QFrame):
     
     
     def saveProcessor(self):
-        self.runProcessor(self.model.dataSets[self.dataSetIndex].processorStack[self.parent.processorIndex])
+        # Get the active processor
+        activeProcessor = self.model.dataSets[self.dataSetIndex].getActiveProcessor()
+        if activeProcessor:
+            self.runProcessor(activeProcessor)
         self.reprocessed.emit()
         self.changeAxis.emit("PPM")
         pathToProcessorFile = self.model.dataSets[self.dataSetIndex].data.path + "pynmrProcessor.pickle"
         self.copyProcessor()
+        # Save all processors in the stack
         with open(pathToProcessorFile, "wb") as file:
             dill.dump(self.model.dataSets[self.dataSetIndex].processorStack, file)
         print(pathToProcessorFile)
@@ -165,6 +197,10 @@ class ProcessorViewWidget(qtw.QFrame):
 
      # Emit a signal to notify that the processor stack has been updated
         self.reprocessed.emit()
+    
+    def updateProcessorView(self):
+        """Rebuild the processor view when the active processor changes."""
+        self.buildProcessorView()
         
     def updatePivotFromData(self, pivot_position):
         """Update pivot position in phase correction widget from data widget"""
@@ -175,7 +211,7 @@ class ProcessorViewWidget(qtw.QFrame):
 
     def copyProcessor(self):
         """Copy the current processor to clipboard."""
-        processor = self.model.dataSets[0].processorStack[self.parent.processorIndex]
+        processor = self.model.dataSets[self.dataSetIndex].getActiveProcessor()
         if processor:
             operation_list = []
             for op in processor:
