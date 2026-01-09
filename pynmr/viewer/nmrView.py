@@ -366,18 +366,22 @@ class NmrViewWidget(qtw.QFrame):
     def updatePW(self, replot = False):
         self.pw.setLabel('bottom', self.xLabel, units=self.xUnit)
 
+        min_len = min(len(self.x), len(self.y))
+        x_data = self.x[:min_len]
+        y_data = self.y[:min_len]
+
         if self.parent.settings.value("showReal", True, type=bool):
-            self.p1.setData(y=np.real(self.y), x=self.x)
+            self.p1.setData(y=np.real(y_data), x=x_data)
         else:
             self.p1.setData(y=[], x=[])
 
         if self.parent.settings.value("showImag", False, type=bool):
-            self.p2.setData(y=np.imag(self.y), x=self.x)
+            self.p2.setData(y=np.imag(y_data), x=x_data)
         else:
             self.p2.setData(y=[], x=[])
 
         if self.parent.settings.value("showMagn", False, type=bool):
-            self.p3.setData(y=np.abs(self.y), x=self.x)
+            self.p3.setData(y=np.abs(y_data), x=x_data)
         else:
             self.p3.setData(y=[], x=[])
 

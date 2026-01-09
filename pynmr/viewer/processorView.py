@@ -1,6 +1,7 @@
 # import sys
 # import numpy as np
 import dill
+import clipboard as cb
 from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui as qtg
 from PyQt5 import QtCore as qtc
@@ -125,6 +126,7 @@ class ProcessorViewWidget(qtw.QFrame):
         self.reprocessed.emit()
         self.changeAxis.emit("PPM")
         pathToProcessorFile = self.model.dataSets[self.dataSetIndex].data.path + "pynmrProcessor.pickle"
+        self.copyProcessor()
         with open(pathToProcessorFile, "wb") as file:
             dill.dump(self.model.dataSets[self.dataSetIndex].processorStack, file)
         print(pathToProcessorFile)
@@ -170,6 +172,23 @@ class ProcessorViewWidget(qtw.QFrame):
             if hasattr(widget, 'pivot') and hasattr(widget, 'updatePivotPosition'):
                 widget.operation.pivot = pivot_position
                 widget.pivot.setText(str(pivot_position))
+
+    def copyProcessor(self):
+        """Copy the current processor to clipboard."""
+        processor = self.model.dataSets[0].processorStack[self.parent.processorIndex]
+        if processor:
+            operation_list = []
+            for op in processor:
+                params = {k: v for k, v in op.__dict__.items() if k != 'name'}
+                parameters = ", ".join([f"{key}={repr(value)}" for key, value in params.items()])
+                operation_list.append(f"{op.__class__.__name__}({parameters})")
+            cb.copy("Processor = P.Processor([" + ", ".join(operation_list) + "])")
+            print("Current Processor copied to clipboard.")
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & qtc.Qt.ControlModifier and event.key() == qtc.Qt.Key_C:
+            self.copyProcessor()
+            
 
 #   def openInNotebook(self):
 #       """Open the current processor in a Jupyter notebook."""
