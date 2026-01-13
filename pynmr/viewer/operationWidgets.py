@@ -400,7 +400,7 @@ class BaselineCorrectionWidget(CollapsibleWidget):
         self.dataSetIndex = self.parent.dataSetIndex
         self.dataWidget = self.parent.parent.dataWidget
 
-        self.activeBaselineRegion = None
+        self.activeBaselineRegion = self.parent.parent.regionWidget.activeRegion
 
         mainLayout = qtw.QVBoxLayout()
 
@@ -438,6 +438,8 @@ class BaselineCorrectionWidget(CollapsibleWidget):
         regioset_names = list(regiostack.regionSets.keys()) if hasattr(regiostack, "regionSets") else []
         self.regioCombo.addItems(regioset_names)
         print("regioset_names:", regioset_names)
+        self.regioCombo.setCurrentText(self.activeBaselineRegion)
+
         if self.dataWidget.baselineRegions == [] and len(regioset_names) > 0:
             self.activeBaselineRegion = regioset_names[0]
             self.dataWidget.baselineRegions = regiostack.regionSets[regioset_names[0]].regions
@@ -546,7 +548,6 @@ class BaselineCorrectionWidget(CollapsibleWidget):
         current_text = self.regioCombo.currentText()
         self.regioCombo.clear()
         self.regioCombo.addItems(regioset_names)
-        # Restore previous selection if still available
         if current_text in regioset_names:
             self.regioCombo.setCurrentText(current_text)
     
@@ -556,7 +557,6 @@ class BaselineCorrectionWidget(CollapsibleWidget):
             self.activeBaselineRegion = regioset_name
             regions = self.model.dataSets[self.dataSetIndex].regionStack.regionSets[regioset_name].regions
             self.dataWidget.baselineRegions = regions
-            # Only recalculate baseline if it's currently being shown
             if hasattr(self, 'showBaselineCheck') and self.showBaselineCheck.isChecked():
                 self.calculateAndEmitBaseline()
                 
@@ -572,9 +572,7 @@ class BaselineCorrectionWidget(CollapsibleWidget):
     def updateRegions(self, regions):
         """Update regions from region widget - does not auto-calculate baseline"""
         self.current_regions = regions
-        # Update RegioCombo with latest region sets
         self.updateRegioStack()
-        # Baseline is only calculated when explicitly requested via Show Baseline checkbox
             
     def calculateAndEmitBaseline(self):
         """Calculate baseline and emit the result using selected RegioSet"""
@@ -591,7 +589,6 @@ class BaselineCorrectionWidget(CollapsibleWidget):
             if not baseline_regions:
                 return
             
-            # Get current spectrum data from parent
             data = self.parent.parent.dataWidget.data
             domain = self.parent.parent.dataWidget.domain
             
@@ -624,3 +621,139 @@ class BaselineCorrectionWidget(CollapsibleWidget):
                 self.baselineCalculated.emit(x_data, y_data, baseline_func)
         except Exception as e:
             print(f"Error calculating baseline: {e}")
+
+
+class IntegrationWidget(CollapsibleWidget):
+    """Widget for managing integration calculations based on regions."""
+    
+    # Signals for integration management
+    IntegrationDisplayToggled = qtc.pyqtSignal(bool)  # Show/hide integrals
+    IntegralsCalculated = qtc.pyqtSignal(object, object, object)  # regions, integrals, maxima
+    IntegrationParametersChanged = qtc.pyqtSignal()  # Parameters changed, recalculate integrals
+
+    def __init__(self, operation, parent=None, runFunc=None):
+        super().__init__(title="Integration")
+        self.operation = operation
+        self.runFunc = runFunc
+        self.parent = parent
+        self.model = self.parent.model
+        self.dataSetIndex = self.parent.dataSetIndex
+        self.dataWidget = self.parent.parent.dataWidget
+
+        self.activeIntegrationRegion = self.parent.parent.regionWidget.activeRegion
+        self.integralResults = {}
+
+        mainLayout = qtw.QVBoxLayout()
+
+        # RegioSet selection
+        regioLayout = qtw.QHBoxLayout()
+        regioLabel = qtw.QLabel("RegioSet")
+        self.regioCombo = qtw.QComboBox()
+        regiostack = self.model.dataSets[self.dataSetIndex].regionStack
+        regioset_names = list(regiostack.regionSets.keys()) if hasattr(regiostack, "regionSets") else []
+        self.regioCombo.addItems(regioset_names)
+        print("regioset_names:", regioset_names)
+        self.regioCombo.setCurrentText(self.activeIntegrationRegion)
+        
+        self.regioCombo.currentIndexChanged.connect(
+            lambda idx: self.handleRegioSetChange(self.regioCombo.itemText(idx))
+        )
+        self.regioCombo.currentTextChanged.connect(lambda text: self.handleRegioSetChange(text))
+        regioLayout.addWidget(regioLabel)
+        regioLayout.addWidget(self.regioCombo)
+        mainLayout.addLayout(regioLayout)
+
+        # Show Integrals checkbox
+        self.showIntegralsCheck = qtw.QCheckBox("Show Integrals")
+        self.showIntegralsCheck.setChecked(getattr(self.operation, "showIntegrals", False))
+        self.showIntegralsCheck.stateChanged.connect(self.handleShowIntegralsChange)
+        mainLayout.addWidget(self.showIntegralsCheck)
+
+        self.add_layout(mainLayout)
+
+    def handleRegioSetChange(self, regioset):
+        """Handle RegioSet selection change."""
+        print(f"RegioSet changed to: {regioset}")
+        regiostack = self.model.dataSets[self.dataSetIndex].regionStack
+        
+        if regioset in regiostack.regionSets:
+            regions = regiostack.regionSets[regioset].regions
+            self.dataWidget.baselineRegions = regions
+            if len(regions) >= 1:
+                self.activeIntegrationRegion = regioset
+                if self.showIntegralsCheck.isChecked():
+                    self.calculateAndEmitIntegrals()
+            else:
+                qtw.QMessageBox.warning(self, "Warning", "Selected RegioSet has no regions")
+        else:
+            print(f"RegioSet '{regioset}' not found in regionStack")
+
+    def handleShowIntegralsChange(self, state):
+        """Handle integral display toggle."""
+        show_integrals = bool(state)
+        print(f"Show Integrals changed to: {show_integrals}")
+        self.operation.showIntegrals = show_integrals
+        self.IntegrationDisplayToggled.emit(show_integrals)
+        self.IntegrationParametersChanged.emit()
+        if show_integrals:
+            self.calculateAndEmitIntegrals()
+        else:
+            self.dataWidget.removeIntegrals()
+
+    def updateRegioStack(self):
+        """Update the regioCombo with the latest regionSets from the model."""
+        regiostack = self.model.dataSets[self.dataSetIndex].regionStack
+        regioset_names = list(regiostack.regionSets.keys()) if hasattr(regiostack, "regionSets") else []
+        current_text = self.regioCombo.currentText()
+        self.regioCombo.clear()
+        self.regioCombo.addItems(regioset_names)
+        if current_text in regioset_names:
+            self.regioCombo.setCurrentText(current_text)
+        elif len(regioset_names) > 0:
+            self.regioCombo.setCurrentIndex(0)
+
+    def calculateAndEmitIntegrals(self):
+        """Calculate integrals from the current regions and emit the result."""
+        if self.activeIntegrationRegion is None:
+            return
+        
+        regiostack = self.model.dataSets[self.dataSetIndex].regionStack
+        if self.activeIntegrationRegion not in regiostack.regionSets:
+            return
+        
+        regions = regiostack.regionSets[self.activeIntegrationRegion].regions
+        integrals = []
+        maxima = []
+        
+        x_data = self.dataWidget.x
+        y_raw = self.dataWidget.y
+        
+        if len(y_raw) == 0 or len(x_data) == 0:
+            return
+        
+        parent_settings = self.parent.parent.settings
+        if parent_settings.value("showReal", True, type=bool):
+            spectrum = np.real(y_raw)
+        elif parent_settings.value("showImag", False, type=bool):
+            spectrum = np.imag(y_raw)
+        elif parent_settings.value("showMagn", False, type=bool):
+            spectrum = np.abs(y_raw)
+        else:
+            spectrum = np.real(y_raw)  
+        
+        for region in regions:
+            if isinstance(region, (list, tuple)) and len(region) == 2:
+                start, end = sorted(region)
+                mask = (x_data >= start) & (x_data <= end)
+                if np.any(mask):
+                    region_data = spectrum[mask]
+                    integral_value = np.sum(np.abs(region_data)) 
+                    max_value = np.max(np.abs(region_data))
+                    integrals.append(integral_value)
+                    maxima.append(max_value)
+                else:
+                    integrals.append(0)
+                    maxima.append(0)
+        
+        self.integralResults = {'regions': regions, 'integrals': integrals, 'maxima': maxima}
+        self.IntegralsCalculated.emit(regions, integrals, maxima)

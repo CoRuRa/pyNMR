@@ -323,6 +323,41 @@ class GetAllIntegrals(Operation):
         self.dx = o.dx
 
         return returnList
+    
+class GetMultipleIntegrals(Operation):
+    def __init__(self, regionSet, scale="Hz", part="real"):
+        """This function integrates the real part between start and stop.
+        Default scale is Hz.
+        Arguments:
+        - `regionSet`: list of [start, stop] pairs
+        - `scale`: Hz or ppm
+        - `part`: real or magnitude
+        """
+        self.regionSet = regionSet
+        self.scale = scale
+        self.part = part
+        self.name = "Get Multiple Integrals"
+        self.dx = 0
+
+    def run(self, nmrData):
+        if self.regionSet is None or len(self.regionSet) == 0:
+            return [], []
+        
+        integrals = []
+        for region in self.regionSet:
+            o = GetSingleIntegral(0, region[0], region[1], scale=self.scale,
+                                  part=self.part)
+            integralList = []
+            maxima = []
+            for i in range(nmrData.sizeTD1):
+                o.index = i
+                integralList.append(o.run(nmrData))
+            integrals.append(integralList)
+            maxima.append(nmrData.frequency[np.argmax(integralList)])
+
+            self.dx = o.dx
+
+        return integrals,  maxima
 
 class SumT1IntegrateT2(Operation):
     def __init__(self, start, stop, scale="Hz", part="real"):

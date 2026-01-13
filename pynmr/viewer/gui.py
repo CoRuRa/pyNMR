@@ -212,7 +212,6 @@ class MainWindow(qtw.QMainWindow):
     
     def updateProcessorMenu(self):
         """Update the processor selection in the menu."""
-        # Clear all processor menu items
         self.processor_menu.clear()
         
         if self.model is None or len(self.model.dataSets) == 0:
@@ -220,18 +219,19 @@ class MainWindow(qtw.QMainWindow):
         
         dataSet = self.model.dataSets[0]
         
-        if not hasattr(dataSet, 'processorNames') or len(dataSet.processorNames) == 0:
+        processorNames = dataSet.getprocessorNames()
+
+        if not processorNames or len(processorNames) == 0:
             return
         
-        # Create action group for radio button behavior
         processorActionGroup = qtw.QActionGroup(self)
         processorActionGroup.setExclusive(True)
         
-        for processorName in dataSet.processorNames.keys():
+
+        for processorName in processorNames:
             action = qtw.QAction(processorName, self)
             action.setCheckable(True)
             
-            # Check if this is the active processor
             if hasattr(dataSet, 'activeProcessorName') and dataSet.activeProcessorName == processorName:
                 action.setChecked(True)
             
@@ -246,17 +246,53 @@ class MainWindow(qtw.QMainWindow):
             if dataSet.setActiveProcessor(processorName):
                 self.onActiveProcessorChanged(processorName)
     
+    def setupIntegrationSignals(self):
+        """Setup integration signals when the IntegrationWidget is ready."""
+        if hasattr(self.processorWidget, 'IntegrationWidget'):
+            integration_widget = self.processorWidget.IntegrationWidget
+            integration_widget.IntegrationDisplayToggled.connect(self.dataWidget.toggleIntegralDisplay)
+            integration_widget.IntegralsCalculated.connect(self.dataWidget.updateIntegrals)
+            self.regionWidget.regionsUpdated.connect(integration_widget.updateRegioStack)
+            self.dataWidget.regionsChanged.connect(integration_widget.updateRegioStack)
+            integration_widget.IntegrationParametersChanged.connect(integration_widget.calculateAndEmitIntegrals)
+            self.regionWidget.activeRegionSetChanged.connect(integration_widget.updateRegioStack)
+            self.processorWidget.reprocessed.connect(self.recalculateIntegrals)
+    
+    def setupBaselineSignals(self):
+        """Setup baseline correction signals when the BaselineCorrectionWidget is ready."""
+        if hasattr(self.processorWidget, 'BaselineCorrectionWidget'):
+            baseline_widget = self.processorWidget.BaselineCorrectionWidget
+            baseline_widget.baselineDisplayToggled.connect(self.dataWidget.toggleBaselineDisplay)
+            baseline_widget.baselineApplyToggled.connect(self.dataWidget.toggleBaselineApplication)
+            baseline_widget.baselineCalculated.connect(self.dataWidget.updateBaselinePlot)
+            self.regionWidget.regionsUpdated.connect(baseline_widget.updateRegions)
+            self.dataWidget.regionsChanged.connect(baseline_widget.updateRegions)
+            baseline_widget.baselineParametersChanged.connect(baseline_widget.calculateAndEmitBaseline)
+            self.regionWidget.activeRegionSetChanged.connect(baseline_widget.updateRegioStack)
+            self.processorWidget.reprocessed.connect(self.recalculateBaseline)
+    
+    def recalculateIntegrals(self):
+        """Recalculate integrals after the processor has been rerun."""
+        if hasattr(self.processorWidget, 'IntegrationWidget'):
+            integration_widget = self.processorWidget.IntegrationWidget
+            if hasattr(integration_widget, 'showIntegralsCheck') and integration_widget.showIntegralsCheck.isChecked():
+                integration_widget.calculateAndEmitIntegrals()
+    
+    def recalculateBaseline(self):
+        """Recalculate baseline after the processor has been rerun."""
+        if hasattr(self.processorWidget, 'BaselineCorrectionWidget'):
+            baseline_widget = self.processorWidget.BaselineCorrectionWidget
+            if hasattr(baseline_widget, 'showBaselineCheck') and baseline_widget.showBaselineCheck.isChecked():
+                baseline_widget.calculateAndEmitBaseline()
+    
     def onActiveProcessorChanged(self, processorName):
         """Handle when the active processor changes."""
         if hasattr(self, 'processorWidget'):
-            # Update the processor view to show the new active processor
-            dataSet = self.model.dataSets[0]
-            if processorName in dataSet.processorNames:
-                processorIndex = dataSet.processorNames[processorName]
-                self.processorWidget.updateProcessorView()
-                # Reprocess with the new active processor
-                if 0 <= processorIndex < len(dataSet.processorStack):
-                    self.processorWidget.runProcessor(dataSet.processorStack[processorIndex])
+            self.model.dataSets[0].activeProcessorName = processorName
+            self.model.dataSets[0].setActiveProcessor(processorName)
+            self.processorWidget.updateProcessorView()
+            self.processorWidget.runProcessor(self.model.dataSets[0].getActiveProcessor())
+            #self.dataWidget.update()
         
 
     def updateView(self):
@@ -274,10 +310,10 @@ class MainWindow(qtw.QMainWindow):
         
         self.dataWidget = NmrViewWidget(self, model=self.model)
         
-        self.processorWidget = ProcessorViewWidget(model=self.model, parent=self)
-
         self.regionWidget = RegionViewWidget(model = self.model, parent = self)
         regionAndAnalysisLayout.addWidget(self.regionWidget)
+        
+        self.processorWidget = ProcessorViewWidget(model=self.model, parent=self)
 
         self.titleWidget = TitleViewWidget(model=self.model)
     
@@ -306,41 +342,21 @@ class MainWindow(qtw.QMainWindow):
             qtw.QSizePolicy.Minimum
             )
 
-        
-        #(self.processorWidget)
-
         self.setCentralWidget(widgetAll)
 
-        # Core processing signals
         self.processorWidget.changeAxis.connect(self.dataWidget.changeDomain)
         self.processorWidget.reprocessed.connect(self.dataWidget.update)
-        
-        # Phase correction signals
         self.processorWidget.pivotPositionSignal.connect(self.dataWidget.pivotPositionSignal)
         self.processorWidget.showPivotSignal.connect(self.dataWidget.showPivotSignal)
         self.dataWidget.pivotPositionChanged.connect(self.processorWidget.updatePivotFromData)
-        
-        # Region management signals  
         self.dataWidget.regionsChanged.connect(self.regionWidget.updateFromDataWidget)
         self.regionWidget.regionsUpdated.connect(self.dataWidget.updateRegionDisplay)
         self.dataWidget.regionAddRequested.connect(self.regionWidget.addRegion)
         self.domainBox.currentTextChanged.connect(self.regionWidget.DomainNMRViewChangeUpdate)
         self.regionWidget.regionDisplayToggled.connect(self.dataWidget.toggleRegionDisplay)
 
-        # Baseline correction signals
-        if hasattr(self.processorWidget, 'BaselineCorrectionWidget'):
-            baseline_widget = self.processorWidget.BaselineCorrectionWidget
-            # Baseline display control
-            baseline_widget.baselineDisplayToggled.connect(self.dataWidget.toggleBaselineDisplay)
-            baseline_widget.baselineApplyToggled.connect(self.dataWidget.toggleBaselineApplication)
-            baseline_widget.baselineCalculated.connect(self.dataWidget.updateBaselinePlot)
-            # Region updates for baseline
-            self.regionWidget.regionsUpdated.connect(baseline_widget.updateRegions)
-            self.dataWidget.regionsChanged.connect(baseline_widget.updateRegions)
-            # Parameter changes trigger baseline recalculation
-            baseline_widget.baselineParametersChanged.connect(baseline_widget.calculateAndEmitBaseline)
-            # Active region set changes update baseline widget
-            self.regionWidget.activeRegionSetChanged.connect(baseline_widget.updateRegioStack)
+        self.processorWidget.integrationWidgetReady.connect(self.setupIntegrationSignals)
+        self.processorWidget.baselineWidgetReady.connect(self.setupBaselineSignals)
 
         self.updateProcessorMenu()
         self.show()
@@ -412,11 +428,9 @@ class MainWindow(qtw.QMainWindow):
         for i in range(len(Processor)):
             self.model.dataSets[0].processorStack.append(Processor[i])
         
-        # Initialize processor names if not already set
         if not hasattr(self.model.dataSets[0], 'processorNames'):
             self.model.dataSets[0].processorNames = {}
         
-        # Ensure all processors have names
         for i in range(len(self.model.dataSets[0].processorStack)):
             if i not in self.model.dataSets[0].processorNames.values():
                 name = f"Processor_{i+1}"
@@ -426,7 +440,6 @@ class MainWindow(qtw.QMainWindow):
                     counter += 1
                 self.model.dataSets[0].processorNames[name] = i
         
-        # Set first processor as active if not set
         if not hasattr(self.model.dataSets[0], 'activeProcessorName') or \
            self.model.dataSets[0].activeProcessorName is None:
             if len(self.model.dataSets[0].processorNames) > 0:
@@ -458,7 +471,7 @@ class MainWindow(qtw.QMainWindow):
                 Processor = dill.load(open(path + pathToProcessor, "rb"))
         else:
             print("No Processor found. Using default.")
-            Processor = [PROC.Processor([OPS.LeftShift(data.shiftPoints),
+            Processor = PROC.Processor([OPS.LeftShift(data.shiftPoints),
                                         OPS.LineBroadening(0.0),
                                          OPS.ZeroFilling(0),
                                         OPS.FourierTransform(),
@@ -466,9 +479,12 @@ class MainWindow(qtw.QMainWindow):
                                         OPS.Phase0D(0),
                                         OPS.Phase1D(data.timeShift,
                                                     unit="time"),
-                                        OPS.BaseLineCorrection(regionSet= None , degree=0, scale="Hz", applyLocally=False, fitFunction=None)])]
-
+                                        OPS.BaseLineCorrection(regionSet= None , degree=0, scale="Hz", applyLocally=False, fitFunction=None),
+                                        OPS.GetMultipleIntegrals(regionSet=None, scale="Hz", part="real")
+                                        ])
+            Processor.name = "Processor_1"
         pathToRegionStack = path + "pynmrRegionStack.dill"
+
 
         if os.path.isfile(pathToRegionStack):
             print("Parsing RegionStack from " + pathToRegionStack)
@@ -485,28 +501,25 @@ class MainWindow(qtw.QMainWindow):
                                                              processor=None,
                                                              regionStack=regionStack))
 
-        for i in range(0,len(Processor)):  
-            self.model.dataSets[0].processorStack.append(Processor[i])
+        self.model.dataSets[0].processorStack.append(Processor)
         
-        # Initialize processor names if not already set
-        if not hasattr(self.model.dataSets[0], 'processorNames'):
-            self.model.dataSets[0].processorNames = {}
+        for o in range(len(self.model.dataSets[0].processorStack)):
+            if not hasattr(self.model.dataSets[0].processorStack[o], 'name'):
+                    name = f"Processor_{o+1}"
+                    namelist = [proc.name for proc in self.model.dataSets[0].processorStack if hasattr(proc, 'name')]
+                    print(namelist)
+                    counter = 1
+                    while name in namelist:
+                        name = f"Processor_{o+1}_{counter}"
+                        counter += 1
+                    self.model.dataSets[0].setprocessorname(o, name)
         
-        # Ensure all processors have names
-        for i in range(len(self.model.dataSets[0].processorStack)):
-            if i not in self.model.dataSets[0].processorNames.values():
-                name = f"Processor_{i+1}"
-                counter = 1
-                while name in self.model.dataSets[0].processorNames:
-                    name = f"Processor_{i+1}_{counter}"
-                    counter += 1
-                self.model.dataSets[0].processorNames[name] = i
-        
-        # Set first processor as active if not set
-        if not hasattr(self.model.dataSets[0], 'activeProcessorName') or \
-           self.model.dataSets[0].activeProcessorName is None:
-            if len(self.model.dataSets[0].processorNames) > 0:
-                self.model.dataSets[0].activeProcessorName = list(self.model.dataSets[0].processorNames.keys())[0]
+        if not hasattr(self.model.dataSets[0], 'activeProcessorName') or self.model.dataSets[0].activeProcessorName is None:
+            processorNames = list(self.model.dataSets[0].getprocessorNames())
+            print("processornames "+ str(processorNames))
+            if len(processorNames) > 0:
+                self.model.dataSets[0].activeProcessorName = str(processorNames[0])
+                self.model.dataSets[0].setActiveProcessor(processorNames[0])
         
 
         if self.settings.contains("recentFilesList"):

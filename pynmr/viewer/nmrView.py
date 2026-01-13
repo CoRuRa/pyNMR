@@ -59,6 +59,9 @@ class NmrViewWidget(qtw.QFrame):
         self.applybaleline = False
         self.polynomialdegree = 0
         self.baselineRegions = []
+        
+        self.showIntegrals = False
+        self.integralValues = {}
 
         self.domain = None
         self.pivotPosition = 0
@@ -128,6 +131,17 @@ class NmrViewWidget(qtw.QFrame):
         if not show:
             self.showRegions = False
             self.clearRegions()
+    
+    def toggleIntegralDisplay(self, show):
+        """Show or hide integral display"""
+        self.showIntegrals = show
+    
+    def updateIntegrals(self, regions, integrals, maxima):
+        """Update the integral plot with new data"""
+        if self.showIntegrals:
+            self.plotIntegrals(regions, integrals, maxima)
+        else:
+            self.removeIntegrals()
     
     def toggleBaselineDisplay(self, show):
         """Show or hide baseline display"""
@@ -206,6 +220,35 @@ class NmrViewWidget(qtw.QFrame):
         
         self.pivotPosition = float(val)
         self.updatePW()
+
+    def plotIntegrals(self, regions, integrals, maxima):
+        """Plotting the integrals in the View Widget."""
+        self.removeIntegrals()
+        self.integralPlots = []
+        self.integralValues = {'regions': regions, 'integrals': integrals, 'maxima': maxima}
+        print("Plotting Integrals: ", self.integralValues)
+        for i, integral_value in enumerate(integrals):
+            if i < len(regions) and i < len(maxima):
+                region = regions[i]
+                center = (region[0] + region[1]) / 2
+                y_pos = maxima[i] if maxima[i] > 0 else 1
+                label = pg.TextItem(f"{integral_value:.3g}", anchor=(0.5, 1.0), color=(100, 100, 200))
+                label.setPos(center, y_pos)
+                label.setZValue(10)
+                label.setFont(qtg.QFont("Arial", 10))
+                self.pw.addItem(label)
+                self.integralPlots.append(label)
+
+    def removeIntegrals(self):
+        """Remove the integral plot if it exists."""
+        if hasattr(self, 'integralPlots'):
+            for item in self.integralPlots:
+                try:
+                    self.pw.removeItem(item)
+                except:
+                    pass
+        self.integralPlots = []
+        self.integralValues = {}
 
     def regionPositionrewriteobject(self,RegionSet,Region,newval):
         r = []
@@ -400,6 +443,9 @@ class NmrViewWidget(qtw.QFrame):
             print("Replotting in PW")
             self.pw.autoRange()
 
+
+
+    
 
     
     

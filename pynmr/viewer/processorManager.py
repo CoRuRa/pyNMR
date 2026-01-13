@@ -25,7 +25,6 @@ class ProcessorManager(qtw.QDialog):
         self.dataSetIndex = dataSetIndex
         self.parent = parent
         
-        # Get the processor stack from the model
         self.processorStack = self.model.dataSets[dataSetIndex].processorStack
         
         self.setWindowTitle("Processor Manager")
@@ -100,27 +99,31 @@ class ProcessorManager(qtw.QDialog):
         self.processorListWidget.clear()
         self.activeProcessorCombo.clear()
         
-        if not hasattr(self.model.dataSets[self.dataSetIndex], 'processorNames'):
-            # Initialize processor names if not exists
-            self.model.dataSets[self.dataSetIndex].processorNames = {}
-            for i, proc in enumerate(self.processorStack):
-                self.model.dataSets[self.dataSetIndex].processorNames[f"Processor_{i+1}"] = i
+        for o in range(len(self.model.dataSets[self.dataSetIndex].processorStack)):
+            if not hasattr(self.model.dataSets[self.dataSetIndex].processorStack[o], 'name'):
+                    name = f"Processor_{o+1}"
+                    namelist = self.model.dataSets[self.dataSetIndex].getprocessorNames()
+                    print(namelist)
+                    counter = 1
+                    while name in namelist:
+                        name = f"Processor_{o+1}_{counter}"
+                        counter += 1
+                    self.model.dataSets[0].processorStack[o].processor.setname(name)
         
-        processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+        processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
         
-        for name in processorNames.keys():
+        for name in processorNames:
             self.processorListWidget.addItem(name)
             self.activeProcessorCombo.addItem(name)
         
-        # Set active processor in combo box
         if hasattr(self.model.dataSets[self.dataSetIndex], 'activeProcessorName'):
             activeName = self.model.dataSets[self.dataSetIndex].activeProcessorName
             index = self.activeProcessorCombo.findText(activeName)
             if index >= 0:
                 self.activeProcessorCombo.setCurrentIndex(index)
         elif len(processorNames) > 0:
-            # Set first processor as active if none is set
-            self.model.dataSets[self.dataSetIndex].activeProcessorName = list(processorNames.keys())[0]
+            firstName = list(processorNames.keys())[0]
+            self.model.dataSets[self.dataSetIndex].activeProcessorName = firstName
             self.activeProcessorCombo.setCurrentIndex(0)
             
     def onProcessorSelected(self, currentRow):
@@ -130,7 +133,7 @@ class ProcessorManager(qtw.QDialog):
             return
         
         processorName = self.processorListWidget.item(currentRow).text()
-        processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+        processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
         
         if processorName in processorNames:
             processorIndex = processorNames[processorName]
@@ -155,7 +158,8 @@ class ProcessorManager(qtw.QDialog):
     
     def onActiveProcessorChanged(self, processorName):
         """Handle change of active processor."""
-        if processorName and processorName in self.model.dataSets[self.dataSetIndex].processorNames:
+        processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
+        if processorName in processorNames:
             self.model.dataSets[self.dataSetIndex].activeProcessorName = processorName
             self.activeProcessorChanged.emit(processorName)
     
@@ -164,32 +168,30 @@ class ProcessorManager(qtw.QDialog):
         name, ok = qtw.QInputDialog.getText(self, 'New Processor', 'Enter Processor Name:')
         
         if ok and name:
-            if not hasattr(self.model.dataSets[self.dataSetIndex], 'processorNames'):
-                self.model.dataSets[self.dataSetIndex].processorNames = {}
             
-            processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+            processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
             
             if name in processorNames:
                 qtw.QMessageBox.warning(self, "Error", f"Processor '{name}' already exists!")
                 return
             
-            # Create a default processor
             data = self.model.dataSets[self.dataSetIndex].data
-            newProcessor = PROC.Processor([
-                OPS.LeftShift(data.shiftPoints if hasattr(data, 'shiftPoints') else 0),
-                OPS.LineBroadening(0.0),
-                OPS.ZeroFilling(0),
-                OPS.FourierTransform(),
-                OPS.SetPPMScale(),
-                OPS.Phase0D(0),
-                OPS.Phase1D(data.timeShift if hasattr(data, 'timeShift') else 0, unit="time")
-            ])
-            
-            # Add to stack
+            newProcessor = PROC.Processor([OPS.LeftShift(data.shiftPoints),
+                                        OPS.LineBroadening(0.0),
+                                         OPS.ZeroFilling(0),
+                                        OPS.FourierTransform(),
+                                        OPS.SetPPMScale(),
+                                        OPS.Phase0D(0),
+                                        OPS.Phase1D(data.timeShift,
+                                                    unit="time"),
+                                        OPS.BaseLineCorrection(regionSet= None , degree=0, scale="Hz", applyLocally=False, fitFunction=None),
+                                        OPS.GetMultipleIntegrals(regionSet=None, scale="Hz", part="real")
+                                        ])
+            newProcessor.name = name
             self.processorStack.append(newProcessor)
             processorNames[name] = len(self.processorStack) - 1
             
-            # Set as active
+ 
             self.model.dataSets[self.dataSetIndex].activeProcessorName = name
             
             self.updateProcessorList()
@@ -210,7 +212,7 @@ class ProcessorManager(qtw.QDialog):
                                                 text=oldName)
         
         if ok and newName:
-            processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+            processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
             
             if newName in processorNames and newName != oldName:
                 qtw.QMessageBox.warning(self, "Error", f"Processor '{newName}' already exists!")
@@ -218,8 +220,7 @@ class ProcessorManager(qtw.QDialog):
             
             # Rename
             processorIndex = processorNames[oldName]
-            del processorNames[oldName]
-            processorNames[newName] = processorIndex
+            self.processorStack[processorIndex].name = newName
             
             # Update active processor name if necessary
             if hasattr(self.model.dataSets[self.dataSetIndex], 'activeProcessorName'):
@@ -238,7 +239,6 @@ class ProcessorManager(qtw.QDialog):
         
         processorName = self.processorListWidget.item(currentRow).text()
         
-        # Confirm deletion
         reply = qtw.QMessageBox.question(self, 'Delete Processor', 
                                          f"Are you sure you want to delete '{processorName}'?",
                                          qtw.QMessageBox.Yes | qtw.QMessageBox.No)
@@ -246,29 +246,25 @@ class ProcessorManager(qtw.QDialog):
         if reply == qtw.QMessageBox.No:
             return
         
-        processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+        processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
         
         if len(processorNames) == 1:
             qtw.QMessageBox.warning(self, "Error", "Cannot delete the last processor!")
             return
         
-        # Get the index to delete
         processorIndex = processorNames[processorName]
         
-        # Remove from stack
         del self.processorStack[processorIndex]
         del processorNames[processorName]
         
-        # Update indices for remaining processors
-        for name, idx in processorNames.items():
+        for name in list(processorNames.keys()):
+            idx = processorNames[name]
             if idx > processorIndex:
                 processorNames[name] = idx - 1
         
-        # Update active processor if necessary
         if hasattr(self.model.dataSets[self.dataSetIndex], 'activeProcessorName'):
             if self.model.dataSets[self.dataSetIndex].activeProcessorName == processorName:
-                # Set first remaining processor as active
-                self.model.dataSets[self.dataSetIndex].activeProcessorName = list(processorNames.keys())[0]
+                self.model.dataSets[self.dataSetIndex].activeProcessorName = list(processorNames)[0]
         
         self.updateProcessorList()
         self.processorsModified.emit()
@@ -296,7 +292,6 @@ class ProcessorManager(qtw.QDialog):
             with open(filePath, 'rb') as f:
                 loadedData = dill.load(f)
             
-            # Handle different file formats
             if isinstance(loadedData, list):
                 processors = loadedData
             elif isinstance(loadedData, PROC.Processor):
@@ -305,7 +300,6 @@ class ProcessorManager(qtw.QDialog):
                 qtw.QMessageBox.warning(self, "Error", "Invalid file format!")
                 return
             
-            # Show selection dialog if multiple processors
             if len(processors) > 1:
                 selectedProcessors = self.showProcessorSelectionDialog(processors)
                 if not selectedProcessors:
@@ -313,11 +307,9 @@ class ProcessorManager(qtw.QDialog):
             else:
                 selectedProcessors = processors
             
-            # Add selected processors to stack
-            processorNames = self.model.dataSets[self.dataSetIndex].processorNames
+            processorNames = self.model.dataSets[self.dataSetIndex].getprocessorNames()
             
             for i, proc in enumerate(selectedProcessors):
-                # Generate unique name
                 baseName = f"Loaded_Processor_{len(processorNames) + 1}"
                 name = baseName
                 counter = 1
@@ -348,7 +340,6 @@ class ProcessorManager(qtw.QDialog):
         
         layout.addWidget(qtw.QLabel(f"Found {len(processors)} processor(s). Select which to load:"))
         
-        # List widget with checkboxes
         listWidget = qtw.QListWidget()
         listWidget.setSelectionMode(qtw.QAbstractItemView.MultiSelection)
         
@@ -356,7 +347,7 @@ class ProcessorManager(qtw.QDialog):
             numOps = len(proc.operationStack) if hasattr(proc, 'operationStack') else 0
             item = qtw.QListWidgetItem(f"Processor {i+1} ({numOps} operations)")
             listWidget.addItem(item)
-            item.setSelected(True)  # Select all by default
+            item.setSelected(True)
         
         layout.addWidget(listWidget)
         

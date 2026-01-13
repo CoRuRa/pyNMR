@@ -26,6 +26,10 @@ class ProcessorViewWidget(qtw.QFrame):
     baselineDisplayRequested = qtc.pyqtSignal(bool)  # Show/hide baseline
     baselineApplyRequested = qtc.pyqtSignal(bool)  # Apply/remove baseline correction
     baselineCalculated = qtc.pyqtSignal(object, object)  # x_data, y_data for baseline plot
+    
+    # Widget ready signals
+    integrationWidgetReady = qtc.pyqtSignal()
+    baselineWidgetReady = qtc.pyqtSignal()
 
     def __init__(self, model=None, dataSetIndex=0, parent=None):
         '''
@@ -55,12 +59,10 @@ class ProcessorViewWidget(qtw.QFrame):
 
         self.pWidgets = []
         
-        # Build the processor view
         self.buildProcessorView()
     
     def buildProcessorView(self):
         """Build or rebuild the processor view for the active processor."""
-        # Clear existing widgets
         while self.scrollLayout.count():
             item = self.scrollLayout.takeAt(0)
             if item.widget():
@@ -71,17 +73,14 @@ class ProcessorViewWidget(qtw.QFrame):
         pStack = self.model.dataSets[self.dataSetIndex].processorStack
         
         if len(pStack) == 0:
-            # No processors available
             label = qtw.QLabel("No processors available. Use 'Manage Processors' to create one.")
             self.scrollLayout.addWidget(label)
             return
         
-        # Get the active processor
         activeProcessor = self.model.dataSets[self.dataSetIndex].getActiveProcessor()
         if activeProcessor is None:
             activeProcessor = pStack[self.parent.processorIndex]
         
-        # Get processor name
         processorName = "Processor"
         if hasattr(self.model.dataSets[self.dataSetIndex], 'activeProcessorName'):
             processorName = self.model.dataSets[self.dataSetIndex].activeProcessorName
@@ -119,12 +118,13 @@ class ProcessorViewWidget(qtw.QFrame):
                 self.pWidgets.append(ow.PhaseFirstOrder(op, parent=self, runFunc=runFunc))
                 self.pWidgets[-1].showPivotSignal.connect(self.showPivotSignal)
                 self.pWidgets[-1].pivotPositionSignal.connect(self.pivotPositionSignal)
-
             elif op.name == "Baseline Correction":
                 self.BaselineCorrectionWidget = ow.BaselineCorrectionWidget(op, parent=self, runFunc=runFunc)
                 self.pWidgets.append(self.BaselineCorrectionWidget)
+            elif op.name == "Get Multiple Integrals":
+                self.IntegrationWidget = ow.IntegrationWidget(op, parent=self, runFunc=runFunc)
+                self.pWidgets.append(self.IntegrationWidget)
             self.thisProcessorLayout.addWidget(self.pWidgets[-1])
-        
 
         runButton = qtw.QPushButton("Process (Enter)", self, clicked=partial(self.runProcessor, p))
 
@@ -143,6 +143,9 @@ class ProcessorViewWidget(qtw.QFrame):
         self.thisProcessorLayout.addWidget(saveSpectrumButton)
 
         self.thisProcessorLayout.addSpacerItem(qtw.QSpacerItem(0, 0, qtw.QSizePolicy.Minimum, qtw.QSizePolicy.Expanding))
+        
+        self.integrationWidgetReady.emit()
+        self.baselineWidgetReady.emit()
 
     
     
@@ -150,7 +153,6 @@ class ProcessorViewWidget(qtw.QFrame):
     
     
     def saveProcessor(self):
-        # Get the active processor
         activeProcessor = self.model.dataSets[self.dataSetIndex].getActiveProcessor()
         if activeProcessor:
             self.runProcessor(activeProcessor)
@@ -158,7 +160,6 @@ class ProcessorViewWidget(qtw.QFrame):
         self.changeAxis.emit("PPM")
         pathToProcessorFile = self.model.dataSets[self.dataSetIndex].data.path + "pynmrProcessor.pickle"
         self.copyProcessor()
-        # Save all processors in the stack
         with open(pathToProcessorFile, "wb") as file:
             dill.dump(self.model.dataSets[self.dataSetIndex].processorStack, file)
         print(pathToProcessorFile)
@@ -195,7 +196,6 @@ class ProcessorViewWidget(qtw.QFrame):
             else:
                 print(f"Warning: Widget {widget} does not have an updateValues method.")
 
-     # Emit a signal to notify that the processor stack has been updated
         self.reprocessed.emit()
     
     def updateProcessorView(self):

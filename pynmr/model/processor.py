@@ -12,7 +12,7 @@ class Processor(object):
     def __init__(self, operationStack):
         """Define a pyNMR Processor. A processor is a list of operations
         that can be applied to NMR data."""
-
+        self.name = None
         self.operationStack = operationStack
 
     def runStack(self, nmrData, endpoint=-1, startpoint=0):
